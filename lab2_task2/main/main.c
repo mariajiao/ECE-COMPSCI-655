@@ -94,7 +94,31 @@ static lv_disp_t *gui_setup(void) {
 
 // Main application entry point
 void app_main(void) {
-
   // Initialize GUI and get display handle
   lv_disp_t *disp = gui_setup();
+  if (lvgl_port_lock(0)) {
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *label1 = lv_label_create(scr);
+    lv_obj_t *label2 = lv_label_create(scr);
+    lv_obj_t *label3 = lv_label_create(scr);
+
+    lv_label_set_text(label1, "yj229");
+    lv_label_set_text(label2, "yj229");
+    lv_label_set_text(label3, "yj229");
+
+    lv_obj_set_style_text_font(label1, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(label2, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(label3, &lv_font_montserrat_32, 0);
+
+    lv_obj_align(label1, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(label2, LV_ALIGN_TOP_MID, 0, 50);
+    lv_obj_align(label3, LV_ALIGN_TOP_MID, 0, 100);
+
+    //lv_obj_center(label);
+
+    lvgl_port_unlock();
+  }
+  
+
+
 }
