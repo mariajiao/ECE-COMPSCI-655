@@ -11,11 +11,12 @@
 #include "freertos/task.h"
 #include "lvgl.h" // LVGL graphics library
 #include "pin_config.h"
-#include <driver/adc.h> // ADC driver
+#include "esp_adc/adc_oneshot.h"// ADC driver
 #include <stdio.h>
 
 static const char *TAG = "lab2_task3";
 static lv_disp_t *disp;
+#define BUTTON_PIN 38
 
 // Board-specific pin and display configuration
 #include "esp32s3_box_lcd_config.h"
@@ -99,13 +100,90 @@ static lv_disp_t *gui_setup(void) {
   return disp;
 }
 
+static adc_oneshot_unit_handle_t adc2_handle;
+static lv_obj_t *label1;
+
+
 // Function to read temperature from TMP36 sensor
-static float read_temperature() { return 0.0; }
+static float read_temperature() { 
+    int raw;
+    adc_oneshot_read(adc2_handle, ADC_CHANNEL_0, &raw);
+    float vout = raw * 3300/4095;
+    float celsius = (vout - 500)/10;
+    return (celsius * 9/5) + 32;
+ }
 
 // ISR handler - only updates LCD display with current sensor reading
-static void IRAM_ATTR button_isr_handler(void *arg) {}
+static volatile bool update_temp = true;
+static volatile int64_t last_isr_us = 0;
+
+static void IRAM_ATTR button_isr_handler(void *arg)
+{
+    int64_t now = esp_timer_get_time();
+    if(now - last_isr_us < 50000)
+        return;
+    last_isr_us = now;
+
+    int level = gpio_get_level(BUTTON_PIN);
+
+    if(level == 0) {
+        update_temp = true;
+    }
+
+
+}
+
+
 
 void app_main(void) {
+  gpio_config_t button_conf = {
+    .pin_bit_mask = (1ULL << BUTTON_PIN),
+    .mode = GPIO_MODE_INPUT,
+    .intr_type = GPIO_INTR_ANYEDGE
+  };
+  gpio_config(&button_conf);
+  gpio_install_isr_service(0);
+
+  gpio_isr_handler_add(BUTTON_PIN, button_isr_handler, NULL);
+
+
   // Initialize GUI and get display handle
-  disp = gui_setup();
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = ADC_UNIT_2,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc2_handle));
+
+    // 2. Configure the Channel (attached to the handle)
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_12,
+        .atten = ADC_ATTEN_DB_12,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc2_handle, ADC_CHANNEL_0, &config));
+
+    disp = gui_setup();
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *scr = lv_scr_act();
+        label1 = lv_label_create(scr);
+        lv_obj_set_style_text_font(label1, &lv_font_montserrat_14, 0);
+        lv_obj_center(label1);
+
+        lvgl_port_unlock();
+    }
+
+    while(1) {
+        if(update_temp) {
+            update_temp = false;
+
+            char temp_text[32];
+            snprintf(temp_text, sizeof(temp_text), "Temp: %.2f °F", read_temperature());
+            if(lvgl_port_lock(0)) {
+                lv_label_set_text(label1, temp_text);
+                lvgl_port_unlock();
+            }
+
+
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
