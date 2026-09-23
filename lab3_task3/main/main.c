@@ -19,10 +19,12 @@
 // Board-specific pin and display configuration
 #include "esp32s3_box_lcd_config.h"
 
+
 static const char *TAG = "lab3_task3";
 
 #define I2C_MASTER_NUM I2C_NUM_0  /*!< I2C port number for master dev */
 #define I2C_MASTER_FREQ_HZ 400000 /*!< I2C master clock frequency */
+
 
 static mpu6050_handle_t mpu6050_dev = NULL;
 static lv_disp_t *disp;
@@ -125,10 +127,99 @@ static lv_disp_t *gui_setup(void) {
   return disp;
 }
 
+
+static volatile bool gyro_read = true;
+static volatile int64_t last_isr_us = 0;
+static lv_obj_t *label1;
+static lv_obj_t *label2;
+static lv_obj_t *label3;
+#define BUTTON_PIN 38
+
+static void IRAM_ATTR button_isr_handler(void *arg)
+{
+    int64_t now = esp_timer_get_time();
+    if(now - last_isr_us < 50000)
+        return;
+    last_isr_us = now;
+
+    int level = gpio_get_level(BUTTON_PIN);
+
+    if(level == 0) {
+        gyro_read = true;
+    }
+
+}
+
+
 void app_main(void) {
   // Initialize GUI and get display handle
   disp = gui_setup();
 
+     //initialize button 
+    gpio_config_t button_conf = {
+        .pin_bit_mask = (1ULL << BUTTON_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = GPIO_INTR_ANYEDGE
+    };
+    gpio_config(&button_conf);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(BUTTON_PIN, button_isr_handler, NULL);
+
+
+
+    //display
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *scr = lv_scr_act();
+        label1 = lv_label_create(scr);
+        lv_label_set_text(label1, "X_acc -- , X_gyro --");
+        lv_obj_align(label1, LV_ALIGN_CENTER, 0, -40);
+
+        label2 = lv_label_create(scr);
+        lv_label_set_text(label2, "Y_acc -- , Y_gyro --");
+        lv_obj_align(label2, LV_ALIGN_CENTER, 0, 0);
+
+        label3 = lv_label_create(scr);
+        lv_label_set_text(label3, "Z_acc -- , Z_gyro --");
+        lv_obj_align(label3, LV_ALIGN_CENTER, 0, 40);
+
+        lvgl_port_unlock();
+    }
+
   // Initialize MPU6050 sensor
   mpu6050_setup();
+
+    while(1) {
+      if(gyro_read) {
+        gyro_read = false;
+
+        mpu6050_acce_value_t acce;
+        mpu6050_gyro_value_t gyro;
+
+        mpu6050_get_acce(mpu6050_dev, &acce);
+        mpu6050_get_gyro(mpu6050_dev, &gyro);
+
+        char text1[50];
+        char text2[50];
+        char text3[50];
+
+        sprintf(text1, "X_acc %.1f, X_gyro %.1f", acce.acce_x, gyro.gyro_x);
+        sprintf(text2, "Y_acc %.1f, Y_gyro %.1f", acce.acce_y, gyro.gyro_y);
+        sprintf(text3, "Z_acc %.1f, Z_gyro %.1f", acce.acce_z, gyro.gyro_z);
+
+        if (lvgl_port_lock(0)) {
+            lv_label_set_text(label1, text1);
+            lv_label_set_text(label2, text2);
+            lv_label_set_text(label3, text3);
+            lvgl_port_unlock();
+
+        
+      }
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }
+
+    
+
+
 }
