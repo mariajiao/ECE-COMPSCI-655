@@ -13,7 +13,10 @@
 #include <freertos/task.h>
 #include <stdio.h>
 
+
 static const char *TAG = "lab3_task1";
+#define BUTTON_PIN 38
+
 
 // Board-specific pin and display configuration
 #include "esp32s3_box_lcd_config.h"
@@ -92,8 +95,81 @@ static lv_disp_t *gui_setup(void) {
   return disp;
 }
 
-void app_main(void) {
-  disp = gui_setup();
+static volatile bool dht_read = true;
+static volatile int64_t last_isr_us = 0;
+static lv_obj_t *label1;
+static lv_obj_t *label2;
 
-  DHT11_init(DIGITAL_TEMP_PIN);
+static void IRAM_ATTR button_isr_handler(void *arg)
+{
+    int64_t now = esp_timer_get_time();
+    if(now - last_isr_us < 50000)
+        return;
+    last_isr_us = now;
+
+    int level = gpio_get_level(BUTTON_PIN);
+
+    if(level == 0) {
+        dht_read = true;
+    }
+
+}
+
+void app_main(void) {
+    DHT11_init(DIGITAL_TEMP_PIN);
+     //initialize button 
+    gpio_config_t button_conf = {
+        .pin_bit_mask = (1ULL << BUTTON_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = GPIO_INTR_ANYEDGE
+    };
+    gpio_config(&button_conf);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(BUTTON_PIN, button_isr_handler, NULL);
+
+
+    //display
+    disp = gui_setup();
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *scr = lv_scr_act();
+        label1 = lv_label_create(scr);
+        lv_label_set_text(label1, "Temp: -- °F");
+        lv_obj_align(label1, LV_ALIGN_CENTER, 0, -20);
+
+        label2 = lv_label_create(scr);
+        lv_label_set_text(label2, "RH: -- %");
+        lv_obj_align(label2, LV_ALIGN_CENTER, 0, 20);
+
+        lvgl_port_unlock();
+    }
+
+
+    while (1) {
+
+        if (dht_read) {
+            dht_read = false;
+
+            struct dht11_reading data = DHT11_read();
+
+            float temp_f = data.temperature * 9.0 / 5.0 + 32.0;
+
+            char temp_text[30];
+            char humidity_text[30];
+
+            sprintf(temp_text, "Temp: %.1f °F", temp_f);
+            sprintf(humidity_text, "RH: %d %%", data.humidity);
+
+            if (lvgl_port_lock(0)) {
+                lv_label_set_text(label1, temp_text);
+                lv_label_set_text(label2, humidity_text);
+                lvgl_port_unlock();
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+
+
+
 }
