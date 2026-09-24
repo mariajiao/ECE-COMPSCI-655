@@ -125,10 +125,130 @@ static lv_disp_t *gui_setup(void) {
   return disp;
 }
 
+static lv_obj_t *label1;
+static lv_obj_t *label2;
+static lv_obj_t *label3;
+static volatile bool add_new_reading = true;
+
+static float x_acce[10] = {0};
+static float y_acce[10] = {0};
+static float z_acce[10] = {0};
+static float x_gyro[10] = {0};
+static float y_gyro[10] = {0};
+static float z_gyro[10] = {0};
+
+static size_t buf_index = 0;
+static size_t counter = 0;
+
+static void timer_isr_handler(void *arg)
+{
+    add_new_reading = true;
+}
+
+
 void app_main(void) {
   // Initialize GUI and get display handle
   disp = gui_setup();
 
-  // Initialize MPU6050 sensor
+    // Initialize MPU6050 sensor
   mpu6050_setup();
+
+  //create timer for 100 ms
+  esp_timer_create_args_t timer_args1 = {
+    .callback = &timer_isr_handler,
+    .name = "timer",
+  };
+  esp_timer_handle_t timer1;
+  esp_timer_create(&timer_args1, &timer1);
+  esp_timer_start_periodic(timer1, 100*1000);
+
+  //display
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *scr = lv_scr_act();
+        label1 = lv_label_create(scr);
+        lv_label_set_text(label1, "X_acc -- , X_gyro --");
+        lv_obj_align(label1, LV_ALIGN_CENTER, 0, -40);
+
+        label2 = lv_label_create(scr);
+        lv_label_set_text(label2, "Y_acc -- , Y_gyro --");
+        lv_obj_align(label2, LV_ALIGN_CENTER, 0, 0);
+
+        label3 = lv_label_create(scr);
+        lv_label_set_text(label3, "Z_acc -- , Z_gyro --");
+        lv_obj_align(label3, LV_ALIGN_CENTER, 0, 40);
+
+        lvgl_port_unlock();
+    }
+
+
+
+
+
+
+  while (1) {
+
+    if(add_new_reading){
+      add_new_reading = false;
+
+      mpu6050_acce_value_t acce;
+      mpu6050_gyro_value_t gyro;
+
+      mpu6050_get_acce(mpu6050_dev, &acce);
+      mpu6050_get_gyro(mpu6050_dev, &gyro);
+
+      x_acce[buf_index] = acce.acce_x;
+      y_acce[buf_index] = acce.acce_y;
+      z_acce[buf_index] = acce.acce_z;
+
+      x_gyro[buf_index] = gyro.gyro_x;
+      y_gyro[buf_index] = gyro.gyro_y;
+      z_gyro[buf_index] = gyro.gyro_z;
+
+      buf_index = (buf_index + 1) % 10;
+      if (counter < 10) {
+        counter++;
+      }
+
+      float x_acce_sum = 0.0f, y_acce_sum = 0.0f, z_acce_sum = 0.0f;
+      float x_gyro_sum = 0.0f, y_gyro_sum = 0.0f, z_gyro_sum = 0.0f;
+
+      for(int i = 0; i < counter; i++) {
+        x_acce_sum += x_acce[i];
+        y_acce_sum += y_acce[i];
+        z_acce_sum += z_acce[i];
+
+        x_gyro_sum += x_gyro[i];
+        y_gyro_sum += y_gyro[i];
+        z_gyro_sum += z_gyro[i];
+
+      }
+      float x_acc_avg = x_acce_sum / counter;
+      float y_acc_avg = y_acce_sum / counter;
+      float z_acc_avg = z_acce_sum / counter;
+
+      float x_gyro_avg = x_gyro_sum / counter;
+      float y_gyro_avg = y_gyro_sum / counter;
+      float z_gyro_avg = z_gyro_sum / counter;
+
+if (lvgl_port_lock(0)) {
+        char buf[64];
+
+        snprintf(buf, sizeof(buf), "X_acc %.1f, X_gyro %.1f", x_acc_avg, x_gyro_avg);
+        lv_label_set_text(label1, buf);
+
+        snprintf(buf, sizeof(buf), "Y_acc %.1f, Y_gyro %.1f", y_acc_avg, y_gyro_avg);
+        lv_label_set_text(label2, buf);
+
+        snprintf(buf, sizeof(buf), "Z_acc %.1f, Z_gyro %.1f", z_acc_avg, z_gyro_avg);
+        lv_label_set_text(label3, buf);
+
+        lvgl_port_unlock();
+      }
+
+
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
 }
